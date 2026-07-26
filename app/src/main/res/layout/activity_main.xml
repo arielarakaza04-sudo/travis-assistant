@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#0D1B2A"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:text="Tap the mic and talk to Travis"
+        android:textColor="#E0E6ED"
+        android:textSize="18sp"
+        android:gravity="top" />
+
+    <Button
+        android:id="@+id/micButton"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:layout_marginTop="16dp"
+        android:text="🎤 Talk to Travis"
+        android:textSize="20sp"
+        android:backgroundTint="#2CA6A4"
+        android:textColor="#FFFFFF" />
+
+</LinearLayout>
