@@ -6,7 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
-import android.widget.Button
+import android.widget.ImageButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -37,7 +37,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setContentView(R.layout.activity_main)
 
         statusText = findViewById(R.id.statusText)
-        val micButton = findViewById<Button>(R.id.micButton)
+
+                val micButton = findViewById<ImageButton>(R.id.micButton)
 
         tts = TextToSpeech(this, this)
         startForegroundService(Intent(this,                                  TravisService::class.java))
