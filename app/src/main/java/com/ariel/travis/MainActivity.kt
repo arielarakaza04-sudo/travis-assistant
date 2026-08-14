@@ -17,6 +17,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var tts: TextToSpeech
     private lateinit var statusText: TextView
+    private lateinit var waveView: WaveView
 
     private val speechLauncher =
         registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
@@ -36,10 +37,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        statusText = findViewById(R.id.statusText)
-
-                val micButton = findViewById<ImageButton>(R.id.micButton)
-
+statusText = findViewById(R.id.statusText)
+        waveView = findViewById(R.id.waveView)
+        val micButton = findViewById<ImageButton>(R.id.micButton)
+        
         tts = TextToSpeech(this, this)
         startForegroundService(Intent(this,                                  TravisService::class.java))
 
@@ -82,8 +83,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             startListening()
         }
     }
-
-    private fun startListening() {
+private fun startListening() {
+        waveView.visibility = android.view.View.VISIBLE
+        waveView.startAnimating()
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
@@ -93,6 +95,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun speak(text: String) {
+        waveView.visibility = android.view.View.VISIBLE
+        waveView.startAnimating()
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
     }
 
