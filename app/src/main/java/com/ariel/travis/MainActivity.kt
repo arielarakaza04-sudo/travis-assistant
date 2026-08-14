@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val micButton = findViewById<Button>(R.id.micButton)
 
         tts = TextToSpeech(this, this)
+     startForegroundService(Intent(this, TravisService::class.java))
 
         micButton.setOnClickListener {
             checkMicPermissionAndListen()
