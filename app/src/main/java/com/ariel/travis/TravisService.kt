@@ -58,10 +58,15 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val heard = matches?.get(0)?.lowercase(Locale.getDefault()) ?: ""
 
-                if (heard.contains("travis")) {
-                    val reply = Brain.respond(heard)
-                    tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
-                }
+            if (heard.contains("travis")) {
+    val handledTask = TaskHandler.handle(applicationContext, heard)
+    if (handledTask) {
+        tts.speak("Done", TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
+    } else {
+        val reply = Brain.respond(heard)
+        tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
+    }
+}
 
                 isListening = false
                 restartListening()
