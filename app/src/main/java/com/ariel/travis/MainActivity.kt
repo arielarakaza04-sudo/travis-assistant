@@ -3,106 +3,62 @@ package com.ariel.travis
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
-import android.speech.RecognizerIntent
-import android.speech.tts.TextToSpeech
-import android.widget.ImageButton
-import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import java.util.Locale
 
-class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
+class MainActivity : AppCompatActivity() {
 
-    private lateinit var tts: TextToSpeech
-    private lateinit var statusText: TextView
-    private lateinit var waveView: WaveView
-
-    private val speechLauncher =
-        registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == RESULT_OK) {
-                val data = result.data
-                val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                val spokenText = results?.get(0) ?: ""
-                if (spokenText.isNotBlank()) {
-                    val reply = Brain.respond(spokenText)
-                    statusText.text = "You: $spokenText\n\nTravis: $reply"
-                    speak(reply)
-                }
-            }
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val micGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
+        val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions[Manifest.permission.POST_NOTIFICATIONS] ?: false
+        } else {
+            true // not needed below Android 13
         }
+
+        if (micGranted && notifGranted) {
+            startTravisService()
+        }
+        // If denied, Travis simply won't start listening until permissions are granted.
+        // You can add a message/dialog here later explaining why it's needed.
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-statusText = findViewById(R.id.statusText)
-        waveView = findViewById(R.id.waveView)
-        val micButton = findViewById<ImageButton>(R.id.micButton)
-        
-        tts = TextToSpeech(this, this)
-        startForegroundService(Intent(this,                                  TravisService::class.java))
-
-        micButton.setOnClickListener {
-            checkMicPermissionAndListen()
-        }
+        checkPermissionsAndStart()
     }
 
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale.US
+    private fun checkPermissionsAndStart() {
+        val neededPermissions = mutableListOf(Manifest.permission.RECORD_AUDIO)
 
-            val voiceList = StringBuilder()
-            tts.voices?.filter { it.locale == Locale.US }?.forEach { voice ->
-                voiceList.append("${voice.name}\n")
-            }
-            statusText.text = voiceList.toString()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            neededPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
-    }
 
-    private fun checkMicPermissionAndListen() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+        val notGranted = neededPermissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (notGranted.isEmpty()) {
+            startTravisService()
         } else {
-            startListening()
+            permissionLauncher.launch(notGranted.toTypedArray())
         }
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 1 && grantResults.isNotEmpty() &&
-            grantResults[0] == PackageManager.PERMISSION_GRANTED
-        ) {
-            startListening()
+    private fun startTravisService() {
+        val serviceIntent = Intent(this, TravisService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
         }
-    }
-private fun startListening() {
-        waveView.visibility = android.view.View.VISIBLE
-        waveView.startAnimating()
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak now...")
-        }
-        speechLauncher.launch(intent)
-    }
-
-    private fun speak(text: String) {
-        waveView.visibility = android.view.View.VISIBLE
-        waveView.startAnimating()
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
-    }
-
-    override fun onDestroy() {
-        tts.stop()
-        tts.shutdown()
-        super.onDestroy()
     }
 }
