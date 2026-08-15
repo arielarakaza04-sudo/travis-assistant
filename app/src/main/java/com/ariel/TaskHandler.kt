@@ -13,7 +13,7 @@ object TaskHandler {
         val text = command.lowercase()
 
         return when {
-            text.contains("set alarm") || text.contains("wake me") -> {
+         text.contains("alarm") || text.contains("wake me") -> {
                 setAlarm(context, text)
                 true
             }
