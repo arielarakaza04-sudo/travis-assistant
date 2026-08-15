@@ -28,20 +28,26 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Listening in the background"))
         tts = TextToSpeech(this, this)
+        recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startListening()
+        return START_STICKY
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts.language = Locale.US
         }
-        startListeningLoop()
     }
 
-    private fun startListeningLoop() {
+    private fun startListening() {
         if (isListening) return
         isListening = true
 
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this)
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
@@ -79,18 +85,8 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun restartListening() {
-        recognizer?.destroy()
-        recognizer = null
-        android.os.Handler(mainLooper).postDelayed({
-            startListeningLoop()
-        }, 500)
+        android.os.Handler(mainLooper).postDelayed({ startListening() }, 500)
     }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_STICKY
-    }
-
-    override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         recognizer?.destroy()
@@ -115,11 +111,6 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
                 "Travis Background Service",
                 NotificationManager.IMPORTANCE_LOW
             )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-    }
-}
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
