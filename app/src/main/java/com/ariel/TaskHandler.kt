@@ -1,15 +1,21 @@
 package com.ariel.travis
 
+import android.Manifest
 import android.app.AlarmManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.provider.AlarmClock
 import android.provider.CalendarContract
+import android.provider.ContactsContract
+import androidx.core.content.ContextCompat
+import android.speech.tts.TextToSpeech
 
 object TaskHandler {
 
     // Returns true if it handled a task, false if it's just conversation
-    fun handle(context: Context, command: String): Boolean {
+    fun handle(context: Context, command: String, tts: TextToSpeech? = null): Boolean {
         val text = command.lowercase()
 
         return when {
@@ -33,15 +39,18 @@ object TaskHandler {
                 openGallery(context)
                 true
             }
+            text.contains("call ") -> {
+                callContact(context, text, tts)
+                true
+            }
             else -> false
         }
     }
 
     private fun setAlarm(context: Context, text: String) {
-        // Basic version: extracts hour if user says a number, defaults to a system picker otherwise
         val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
             putExtra(AlarmClock.EXTRA_MESSAGE, "Travis Alarm")
-            putExtra(AlarmClock.EXTRA_SKIP_UI, false) // shows confirmation UI first
+            putExtra(AlarmClock.EXTRA_SKIP_UI, false)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         context.startActivity(intent)
@@ -74,7 +83,7 @@ object TaskHandler {
 
     private fun openBrowser(context: Context) {
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            data = android.net.Uri.parse("https://www.google.com")
+            data = Uri.parse("https://www.google.com")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         context.startActivity(intent)
@@ -85,7 +94,6 @@ object TaskHandler {
             addCategory(Intent.CATEGORY_APP_GALLERY)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
-        // Fallback if the OEM doesn't register CATEGORY_APP_GALLERY (common on some phones)
         if (intent.resolveActivity(context.packageManager) != null) {
             context.startActivity(intent)
         } else {
@@ -95,5 +103,62 @@ object TaskHandler {
             }
             context.startActivity(fallback)
         }
+    }
+
+    private fun callContact(context: Context, text: String, tts: TextToSpeech?) {
+        // Extract the name after "call "
+        val name = text.substringAfter("call ").trim()
+
+        if (name.isEmpty()) {
+            tts?.speak("Who do you want to call?", TextToSpeech.QUEUE_FLUSH, null, "travis_call_empty")
+            return
+        }
+
+        val hasCallPermission = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.CALL_PHONE
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasContactsPermission = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.READ_CONTACTS
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasCallPermission || !hasContactsPermission) {
+            tts?.speak(
+                "I need call and contacts permission to do that.",
+                TextToSpeech.QUEUE_FLUSH, null, "travis_call_noperm"
+            )
+            return
+        }
+
+        val phoneNumber = lookupContactNumber(context, name)
+
+        if (phoneNumber == null) {
+            tts?.speak("I couldn't find $name in your contacts.", TextToSpeech.QUEUE_FLUSH, null, "travis_call_notfound")
+            return
+        }
+
+        val callIntent = Intent(Intent.ACTION_CALL).apply {
+            data = Uri.parse("tel:$phoneNumber")
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        context.startActivity(callIntent)
+    }
+
+    private fun lookupContactNumber(context: Context, name: String): String? {
+        val resolver = context.contentResolver
+        val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+        val projection = arrayOf(
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.NUMBER
+        )
+        val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
+        val selectionArgs = arrayOf("%$name%")
+
+        resolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                return cursor.getString(numberIndex)
+            }
+        }
+        return null
     }
 }
