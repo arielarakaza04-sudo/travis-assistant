@@ -69,7 +69,6 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
         recognizer?.setRecognitionListener(object : RecognitionListener {
 
             override fun onResults(results: Bundle?) {
-                unmuteBeep()
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val heard = matches?.get(0)?.lowercase(Locale.getDefault()) ?: ""
 
@@ -105,7 +104,6 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
             }
 
             override fun onError(error: Int) {
-                unmuteBeep()
                 isListening = false
                 restartListening()
             }
@@ -131,10 +129,12 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
 
     private fun muteBeep() {
         audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0)
-    }
-
-    private fun unmuteBeep() {
-        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+        // Auto-release shortly after - short enough to cover just the system tone,
+        // and decoupled from how long TaskHandler/Groq takes to respond, so Travis's
+        // own voice never gets caught muted.
+        android.os.Handler(mainLooper).postDelayed({
+            audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+        }, 400)
     }
 
     private fun bytesToShorts(bytes: ByteArray): ShortArray {
