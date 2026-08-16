@@ -46,7 +46,7 @@ object GroqClient {
 
             override fun onResponse(call: Call, response: Response) {
                 try {
-                    val bodyStr = response.body()?.string() ?: ""
+                    val bodyStr = response.body?.string() ?: ""
                     val reply = JSONObject(bodyStr)
                         .getJSONArray("choices")
                         .getJSONObject(0)
