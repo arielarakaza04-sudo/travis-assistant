@@ -3,8 +3,11 @@ package com.ariel.travis
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -20,18 +23,37 @@ class MainActivity : AppCompatActivity() {
         } else {
             true
         }
-        // Call/contacts/media are optional features - Travis still starts without them,
-        // those specific commands just won't work until granted.
 
         if (micGranted && notifGranted) {
             startTravisService()
         }
     }
 
+    private val allFilesAccessLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        // Whether granted or not, continue on to the normal permission flow
+        checkPermissionsAndStart()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        maybeRequestAllFilesAccess()
+    }
+
+    private fun maybeRequestAllFilesAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                allFilesAccessLauncher.launch(intent)
+                return
+            }
+        }
         checkPermissionsAndStart()
     }
 
