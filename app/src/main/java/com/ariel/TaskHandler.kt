@@ -5,12 +5,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Environment
 import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import android.speech.tts.TextToSpeech
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
+import java.io.File
 
 object TaskHandler {
 
@@ -45,6 +50,10 @@ object TaskHandler {
             }
             text.contains("play ") -> {
                 playMedia(context, text, tts)
+                true
+            }
+            text.contains("read ") -> {
+                readBook(context, text, tts)
                 true
             }
             else -> false
@@ -173,7 +182,6 @@ object TaskHandler {
             return
         }
 
-        // Try local/offline audio first
         val localUri = findLocalAudio(context, query)
         if (localUri != null) {
             val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -184,7 +192,6 @@ object TaskHandler {
             return
         }
 
-        // Fall back to online search (covers both music and video)
         val encoded = Uri.encode(query)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             data = Uri.parse("https://www.youtube.com/results?search_query=$encoded")
@@ -217,5 +224,67 @@ object TaskHandler {
             }
         }
         return null
+    }
+
+    private fun readBook(context: Context, text: String, tts: TextToSpeech?) {
+        val name = text.substringAfter("read ").trim()
+
+        if (name.isEmpty()) {
+            tts?.speak("Which book do you want me to read?", TextToSpeech.QUEUE_FLUSH, null, "travis_read_empty")
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+            tts?.speak(
+                "I need file access permission first. Please grant All files access in settings.",
+                TextToSpeech.QUEUE_FLUSH, null, "travis_read_noperm"
+            )
+            return
+        }
+
+        val documentsDir = File(Environment.getExternalStorageDirectory(), "Documents")
+        val pdfFile = documentsDir.listFiles { f ->
+            f.extension.equals("pdf", ignoreCase = true) &&
+                f.nameWithoutExtension.contains(name, ignoreCase = true)
+        }?.firstOrNull()
+
+        if (pdfFile == null) {
+            tts?.speak("I couldn't find $name in your Documents folder.", TextToSpeech.QUEUE_FLUSH, null, "travis_read_notfound")
+            return
+        }
+
+        try {
+            PDFBoxResourceLoader.init(context.applicationContext)
+            val document = PDDocument.load(pdfFile)
+            val stripper = PDFTextStripper()
+            val fullText = stripper.getText(document)
+            document.close()
+            speakInChunks(fullText, tts)
+        } catch (e: Exception) {
+            tts?.speak("I had trouble reading that file.", TextToSpeech.QUEUE_FLUSH, null, "travis_read_error")
+        }
+    }
+
+    private fun speakInChunks(text: String, tts: TextToSpeech?) {
+        if (tts == null) return
+
+        val maxLen = 3500
+        val sentences = text.split(Regex("(?<=[.!?])\\s+"))
+        val chunks = mutableListOf<String>()
+        val current = StringBuilder()
+
+        for (sentence in sentences) {
+            if (current.length + sentence.length > maxLen) {
+                chunks.add(current.toString())
+                current.clear()
+            }
+            current.append(sentence).append(" ")
+        }
+        if (current.isNotEmpty()) chunks.add(current.toString())
+
+        chunks.forEachIndexed { index, chunk ->
+            val queueMode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            tts.speak(chunk, queueMode, null, "travis_read_chunk_$index")
+        }
     }
 }
