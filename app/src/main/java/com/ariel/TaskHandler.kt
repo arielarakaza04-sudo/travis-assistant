@@ -1,7 +1,6 @@
 package com.ariel.travis
 
 import android.Manifest
-import android.app.AlarmManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -9,6 +8,7 @@ import android.net.Uri
 import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.provider.ContactsContract
+import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import android.speech.tts.TextToSpeech
 
@@ -41,6 +41,10 @@ object TaskHandler {
             }
             text.contains("call ") -> {
                 callContact(context, text, tts)
+                true
+            }
+            text.contains("play ") -> {
+                playMedia(context, text, tts)
                 true
             }
             else -> false
@@ -98,7 +102,7 @@ object TaskHandler {
             context.startActivity(intent)
         } else {
             val fallback = Intent(Intent.ACTION_VIEW).apply {
-                data = android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                data = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             context.startActivity(fallback)
@@ -106,7 +110,6 @@ object TaskHandler {
     }
 
     private fun callContact(context: Context, text: String, tts: TextToSpeech?) {
-        // Extract the name after "call "
         val name = text.substringAfter("call ").trim()
 
         if (name.isEmpty()) {
@@ -157,6 +160,60 @@ object TaskHandler {
             if (cursor.moveToFirst()) {
                 val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
                 return cursor.getString(numberIndex)
+            }
+        }
+        return null
+    }
+
+    private fun playMedia(context: Context, text: String, tts: TextToSpeech?) {
+        val query = text.substringAfter("play ").trim()
+
+        if (query.isEmpty()) {
+            tts?.speak("What do you want to play?", TextToSpeech.QUEUE_FLUSH, null, "travis_play_empty")
+            return
+        }
+
+        // Try local/offline audio first
+        val localUri = findLocalAudio(context, query)
+        if (localUri != null) {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(localUri, "audio/*")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            }
+            context.startActivity(intent)
+            return
+        }
+
+        // Fall back to online search (covers both music and video)
+        val encoded = Uri.encode(query)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            data = Uri.parse("https://www.youtube.com/results?search_query=$encoded")
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        context.startActivity(intent)
+    }
+
+    private fun findLocalAudio(context: Context, query: String): Uri? {
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.READ_MEDIA_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+            context, Manifest.permission.READ_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasPermission) return null
+
+        val projection = arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE)
+        val selection = "${MediaStore.Audio.Media.TITLE} LIKE ?"
+        val selectionArgs = arrayOf("%$query%")
+
+        context.contentResolver.query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            projection, selection, selectionArgs, null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val idIndex = cursor.getColumnIndex(MediaStore.Audio.Media._ID)
+                val id = cursor.getLong(idIndex)
+                return Uri.withAppendedPath(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id.toString())
             }
         }
         return null
