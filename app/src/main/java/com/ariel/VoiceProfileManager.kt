@@ -180,4 +180,49 @@ object VoiceProfileManager {
         }
         return result
     }
+
+    // Cosine similarity threshold - tune this after real-world testing.
+    // Higher = stricter (fewer false accepts, more false rejects).
+    private const val MATCH_THRESHOLD = 0.92
+
+    /**
+     * Compares a captured audio sample against all stored voice profiles.
+     * Returns the best-matching name if similarity clears the threshold,
+     * or null if no profile matches closely enough (unknown speaker).
+     */
+    fun identifySpeaker(context: Context, samples: ShortArray): String? {
+        if (samples.isEmpty()) return null
+
+        val profiles = loadProfiles(context)
+        if (profiles.isEmpty()) return null
+
+        val candidateFeatures = extractFeatures(samples)
+
+        var bestName: String? = null
+        var bestScore = -1.0
+
+        for ((name, storedFeatures) in profiles) {
+            val score = cosineSimilarity(candidateFeatures, storedFeatures)
+            if (score > bestScore) {
+                bestScore = score
+                bestName = name
+            }
+        }
+
+        return if (bestScore >= MATCH_THRESHOLD) bestName else null
+    }
+
+    private fun cosineSimilarity(a: DoubleArray, b: DoubleArray): Double {
+        if (a.size != b.size) return 0.0
+        var dot = 0.0
+        var normA = 0.0
+        var normB = 0.0
+        for (i in a.indices) {
+            dot += a[i] * b[i]
+            normA += a[i] * a[i]
+            normB += b[i] * b[i]
+        }
+        if (normA == 0.0 || normB == 0.0) return 0.0
+        return dot / (sqrt(normA) * sqrt(normB))
+    }
 }
