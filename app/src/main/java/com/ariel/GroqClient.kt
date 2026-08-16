@@ -1,5 +1,7 @@
 package com.ariel.travis
 
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType
