@@ -2,7 +2,9 @@ package com.ariel.travis
 
 import kotlinx.coroutines.*
 import android.app.*
+import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -29,6 +31,10 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
 
     // Accumulates raw audio for the current utterance, used for voice verification
     private var audioBuffer = ByteArrayOutputStream()
+
+    private val audioManager: AudioManager by lazy {
+        getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -63,6 +69,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
         recognizer?.setRecognitionListener(object : RecognitionListener {
 
             override fun onResults(results: Bundle?) {
+                unmuteBeep()
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val heard = matches?.get(0)?.lowercase(Locale.getDefault()) ?: ""
 
@@ -98,6 +105,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
             }
 
             override fun onError(error: Int) {
+                unmuteBeep()
                 isListening = false
                 restartListening()
             }
@@ -110,12 +118,23 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
             override fun onBufferReceived(buffer: ByteArray?) {
                 buffer?.let { audioBuffer.write(it) }
             }
-            override fun onEndOfSpeech() {}
+            override fun onEndOfSpeech() {
+                muteBeep()
+            }
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
 
         recognizer?.startListening(intent)
+        muteBeep()
+    }
+
+    private fun muteBeep() {
+        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0)
+    }
+
+    private fun unmuteBeep() {
+        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
     }
 
     private fun bytesToShorts(bytes: ByteArray): ShortArray {
