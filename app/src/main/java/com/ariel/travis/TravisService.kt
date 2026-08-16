@@ -11,6 +11,9 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import androidx.core.app.NotificationCompat
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.Locale
 
 class TravisService : Service(), TextToSpeech.OnInitListener {
@@ -23,6 +26,9 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
     private var recognizer: SpeechRecognizer? = null
     private var isListening = false
+
+    // Accumulates raw audio for the current utterance, used for voice verification
+    private var audioBuffer = ByteArrayOutputStream()
 
     override fun onCreate() {
         super.onCreate()
@@ -55,23 +61,37 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
         }
 
         recognizer?.setRecognitionListener(object : RecognitionListener {
+
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val heard = matches?.get(0)?.lowercase(Locale.getDefault()) ?: ""
 
-            if (heard.contains("travis")) {
-    val handledTask = TaskHandler.handle(applicationContext, heard, tts)
-    if (handledTask) {
-        tts.speak("Done", TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
-    } else {
-        CoroutineScope(Dispatchers.IO).launch {
-            val reply = GroqClient.getResponse(heard)
-            withContext(Dispatchers.Main) {
-                tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
-            }
-        }
-    }
-}
+                if (heard.contains("travis")) {
+                    val isEnrollCommand = heard.contains("remember my voice")
+                    val capturedSamples = bytesToShorts(audioBuffer.toByteArray())
+                    val profiles = VoiceProfileManager.loadProfiles(applicationContext)
+                    val speakerName = VoiceProfileManager.identifySpeaker(applicationContext, capturedSamples)
+
+                    // Allow through if: it's an enrollment command, no profiles exist yet
+                    // (bootstrap case), or the speaker matched a known profile.
+                    val allowed = isEnrollCommand || profiles.isEmpty() || speakerName != null
+
+                    if (allowed) {
+                        val handledTask = TaskHandler.handle(applicationContext, heard, tts)
+                        if (!handledTask) {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                val reply = GroqClient.getResponse(heard)
+                                withContext(Dispatchers.Main) {
+                                    tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
+                                }
+                            }
+                        }
+                        // If handledTask is true, the individual handler in TaskHandler
+                        // already spoke whatever confirmation was needed (or intentionally
+                        // stayed silent for actions like opening an app).
+                    }
+                    // If not allowed: unknown voice, ignore silently - no response at all.
+                }
 
                 isListening = false
                 restartListening()
@@ -82,16 +102,27 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
                 restartListening()
             }
 
-            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onReadyForSpeech(params: Bundle?) {
+                audioBuffer = ByteArrayOutputStream()
+            }
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onBufferReceived(buffer: ByteArray?) {
+                buffer?.let { audioBuffer.write(it) }
+            }
             override fun onEndOfSpeech() {}
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
 
         recognizer?.startListening(intent)
+    }
+
+    private fun bytesToShorts(bytes: ByteArray): ShortArray {
+        if (bytes.isEmpty()) return ShortArray(0)
+        val shorts = ShortArray(bytes.size / 2)
+        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(shorts)
+        return shorts
     }
 
     private fun restartListening() {
