@@ -57,6 +57,10 @@ object TaskHandler {
                 readBook(context, text, tts)
                 true
             }
+            text.contains("remember my voice") -> {
+                enrollVoice(context, text, tts)
+                true
+            }
             else -> false
         }
     }
@@ -264,6 +268,25 @@ object TaskHandler {
         } catch (e: Exception) {
             tts?.speak("I had trouble reading that file.", TextToSpeech.QUEUE_FLUSH, null, "travis_read_error")
         }
+    }
+
+    private fun enrollVoice(context: Context, text: String, tts: TextToSpeech?) {
+        // Expects phrasing like "remember my voice as Ariel"
+        val name = if (text.contains(" as ")) {
+            text.substringAfterLast(" as ").trim()
+        } else {
+            ""
+        }
+
+        if (name.isEmpty()) {
+            tts?.speak(
+                "Who should I remember this voice as? Try saying, remember my voice as your name.",
+                TextToSpeech.QUEUE_FLUSH, null, "voice_enroll_noname"
+            )
+            return
+        }
+
+        VoiceProfileManager.enroll(context, name, tts)
     }
 
     private fun speakInChunks(text: String, tts: TextToSpeech?) {
