@@ -16,19 +16,32 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
 object GroqClient {
-   private const val API_KEY = BuildConfig.GROQ_API_KEY
+    private const val API_KEY = BuildConfig.GROQ_API_KEY
     private const val URL = "https://api.groq.com/openai/v1/chat/completions"
     private val client = OkHttpClient()
 
     suspend fun getResponse(userText: String): String = suspendCancellableCoroutine { cont ->
+        // Strip the wake word so it doesn't confuse the model into thinking
+        // the user is asking about a person named Travis
+        val cleanedText = userText.replace("travis", "", ignoreCase = true).trim()
+
         val json = JSONObject().apply {
             put("model", "llama-3.3-70b-versatile")
-            put("messages", JSONArray().put(
-                JSONObject().apply {
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "system")
+                    put(
+                        "content",
+                        "You are Travis, a helpful personal voice assistant on the user's phone. " +
+                            "Keep replies concise and conversational, suitable for being spoken aloud. " +
+                            "Never refer to yourself as an AI language model or mention Groq or Llama - you are Travis."
+                    )
+                })
+                put(JSONObject().apply {
                     put("role", "user")
-                    put("content", userText)
-                }
-            ))
+                    put("content", cleanedText)
+                })
+            })
         }
 
         val body = json.toString().toRequestBody("application/json".toMediaType())
