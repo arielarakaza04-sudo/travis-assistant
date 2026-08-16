@@ -13,7 +13,7 @@ object TaskHandler {
         val text = command.lowercase()
 
         return when {
-         text.contains("alarm") || text.contains("wake me") -> {
+            text.contains("alarm") || text.contains("wake me") -> {
                 setAlarm(context, text)
                 true
             }
@@ -27,6 +27,10 @@ object TaskHandler {
             }
             text.contains("open browser") -> {
                 openBrowser(context)
+                true
+            }
+            text.contains("open gallery") || text.contains("photos") -> {
+                openGallery(context)
                 true
             }
             else -> false
@@ -74,5 +78,22 @@ object TaskHandler {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         context.startActivity(intent)
+    }
+
+    private fun openGallery(context: Context) {
+        val intent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_APP_GALLERY)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        // Fallback if the OEM doesn't register CATEGORY_APP_GALLERY (common on some phones)
+        if (intent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(intent)
+        } else {
+            val fallback = Intent(Intent.ACTION_VIEW).apply {
+                data = android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(fallback)
+        }
     }
 }
