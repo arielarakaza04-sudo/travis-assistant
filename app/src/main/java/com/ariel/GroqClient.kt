@@ -14,7 +14,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
 object GroqClient {
-   private const val API_KEY = "PLACEHOLDER"
+   private const val API_KEY = BuildConfig.GROQ_API_KEY
     private const val URL = "https://api.groq.com/openai/v1/chat/completions"
     private val client = OkHttpClient()
 
