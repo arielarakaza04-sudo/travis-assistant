@@ -20,12 +20,17 @@ class MainActivity : AppCompatActivity() {
         } else {
             true // not needed below Android 13
         }
+        // Call/contacts are optional features - Travis still starts without them,
+        // it just won't be able to place calls until granted.
+        val callGranted = permissions[Manifest.permission.CALL_PHONE] ?: false
+        val contactsGranted = permissions[Manifest.permission.READ_CONTACTS] ?: false
 
         if (micGranted && notifGranted) {
             startTravisService()
         }
-        // If denied, Travis simply won't start listening until permissions are granted.
-        // You can add a message/dialog here later explaining why it's needed.
+        // If mic/notif denied, Travis simply won't start listening until granted.
+        // If call/contacts denied, calling commands just won't work - handled gracefully
+        // in TaskHandler at request time rather than here.
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,7 +41,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkPermissionsAndStart() {
-        val neededPermissions = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        val neededPermissions = mutableListOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_CONTACTS
+        )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             neededPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
