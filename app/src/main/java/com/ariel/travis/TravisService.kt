@@ -1,5 +1,6 @@
 package com.ariel.travis
 
+import kotlinx.coroutines.*
 import android.app.*
 import android.content.Intent
 import android.os.Build
@@ -63,8 +64,12 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     if (handledTask) {
         tts.speak("Done", TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
     } else {
-        val reply = Brain.respond(heard)
-        tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
+        CoroutineScope(Dispatchers.IO).launch {
+            val reply = GroqClient.getResponse(heard)
+            withContext(Dispatchers.Main) {
+                tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
+            }
+        }
     }
 }
 
