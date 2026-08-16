@@ -29,9 +29,7 @@ object GroqClient {
             ))
         }
 
-        val body = RequestBody.create(
-            MediaType.parse("application/json"), json.toString()
-        )
+        val body = json.toString().toRequestBody("application/json".toMediaType())
 
         val request = Request.Builder()
             .url(URL)
