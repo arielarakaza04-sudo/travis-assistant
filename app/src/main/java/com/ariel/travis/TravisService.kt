@@ -67,6 +67,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
 
         requestAudioFocusOnce()
         TravisLogger.log(this, TAG, "onCreate() done, hasAudioFocus=$hasAudioFocus")
+        TravisLogger.log(this, TAG, "isRecognitionAvailable=${SpeechRecognizer.isRecognitionAvailable(this)}")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
