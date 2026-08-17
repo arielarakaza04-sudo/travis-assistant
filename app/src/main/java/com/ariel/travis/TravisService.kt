@@ -1,4 +1,4 @@
-  package com.ariel.travis
+         package com.ariel.travis
 
 import kotlinx.coroutines.*
 import android.app.*
@@ -51,6 +51,11 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
         Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
             TravisLogger.logCrash(applicationContext, throwable)
         }
+
+        // Whenever a new log line comes in, refresh the notification so
+        // expanding it in the shade shows current activity - no file
+        // browsing or terminal needed to see what Travis is doing.
+        TravisLogger.onNewLine = { refreshNotification() }
 
         TravisLogger.log(this, TAG, "onCreate() start")
 
@@ -225,9 +230,25 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Travis")
             .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(TravisLogger.getRecent()))
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .build()
+    }
+
+    /**
+     * Pull down the notification shade and expand the Travis notification
+     * to see this - it's the recent activity log, updated live. This is the
+     * debugging view: no file browsing or terminal required.
+     */
+    private fun refreshNotification() {
+        try {
+            val notification = buildNotification("Listening in the background")
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.notify(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            // ignore - notification refresh failing shouldn't crash the service
+        }
     }
 
     private fun createNotificationChannel() {
