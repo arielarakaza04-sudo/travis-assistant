@@ -1,3 +1,4 @@
+
 package com.ariel.travis
 
 import kotlinx.coroutines.*
@@ -28,6 +29,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
     private var recognizer: SpeechRecognizer? = null
     private var isListening = false
+    private var isMuted = false
 
     // Accumulates raw audio for the current utterance, used for voice verification
     private var audioBuffer = ByteArrayOutputStream()
@@ -105,7 +107,11 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
 
             override fun onError(error: Int) {
                 isListening = false
-                restartListening()
+                val delay = when (error) {
+                    SpeechRecognizer.ERROR_CLIENT, SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 1000L
+                    else -> 500L
+                }
+                restartListening(delay)
             }
 
             override fun onReadyForSpeech(params: Bundle?) {
@@ -117,7 +123,8 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
                 buffer?.let { audioBuffer.write(it) }
             }
             override fun onEndOfSpeech() {
-                muteBeep()
+                // Mute handling happens once per cycle in startListening() -> muteBeep(),
+                // not here, to avoid overlapping mute/unmute timers.
             }
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -128,12 +135,15 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun muteBeep() {
+        // Guard against overlapping mute/unmute cycles when restarts happen
+        // faster than the unmute timer fires - this was the source of the
+        // volume "jumping" on its own.
+        if (isMuted) return
+        isMuted = true
         audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0)
-        // Auto-release shortly after - short enough to cover just the system tone,
-        // and decoupled from how long TaskHandler/Groq takes to respond, so Travis's
-        // own voice never gets caught muted.
         android.os.Handler(mainLooper).postDelayed({
             audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+            isMuted = false
         }, 400)
     }
 
@@ -144,8 +154,8 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
         return shorts
     }
 
-    private fun restartListening() {
-        android.os.Handler(mainLooper).postDelayed({ startListening() }, 500)
+    private fun restartListening(delay: Long = 500L) {
+        android.os.Handler(mainLooper).postDelayed({ startListening() }, delay)
     }
 
     override fun onDestroy() {
