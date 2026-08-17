@@ -1,4 +1,4 @@
-package com.ariel.travis
+  package com.ariel.travis
 
 import kotlinx.coroutines.*
 import android.app.*
@@ -25,6 +25,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     companion object {
         const val CHANNEL_ID = "travis_service_channel"
         const val NOTIFICATION_ID = 1
+        private const val TAG = "TravisService"
     }
 
     private lateinit var tts: TextToSpeech
@@ -32,7 +33,6 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     private var isListening = false
     private var hasAudioFocus = false
 
-    // Accumulates raw audio for the current utterance, used for voice verification
     private var audioBuffer = ByteArrayOutputStream()
 
     private val audioManager: AudioManager by lazy {
@@ -40,21 +40,34 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     }
 
     private var focusRequest: AudioFocusRequest? = null
-
-    private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { /* no-op: we hold focus for the service lifetime */ }
+    private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { }
 
     override fun onCreate() {
         super.onCreate()
+
+        // Catch anything that would otherwise silently kill the process, and
+        // write it to travis_log.txt before the app dies, so we can read the
+        // real crash reason in Acode instead of guessing.
+        Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
+            TravisLogger.logCrash(applicationContext, throwable)
+        }
+
+        TravisLogger.log(this, TAG, "onCreate() start")
+
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Listening in the background"))
+
         tts = TextToSpeech(this, this)
         recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+
         requestAudioFocusOnce()
+        TravisLogger.log(this, TAG, "onCreate() done, hasAudioFocus=$hasAudioFocus")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        TravisLogger.log(this, TAG, "onStartCommand()")
         startListening()
         return START_STICKY
     }
@@ -63,15 +76,9 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
         if (status == TextToSpeech.SUCCESS) {
             tts.language = Locale.US
         }
+        TravisLogger.log(this, TAG, "TTS init status=$status")
     }
 
-    /**
-     * Requests audio focus exactly once for the lifetime of the service, instead of
-     * grabbing/releasing it (or manually muting/unmuting streams) on every listening
-     * cycle. Repeated focus changes or stream mute toggles are what caused the
-     * perceived "volume going up and down" - this holds focus steady so nothing
-     * oscillates while Travis keeps listening in the background.
-     */
     private fun requestAudioFocusOnce() {
         if (hasAudioFocus) return
 
@@ -98,6 +105,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
             )
             hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
         }
+        TravisLogger.log(this, TAG, "requestAudioFocusOnce() -> $hasAudioFocus")
     }
 
     private fun releaseAudioFocus() {
@@ -112,8 +120,12 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun startListening() {
-        if (isListening) return
+        if (isListening) {
+            TravisLogger.log(this, TAG, "startListening() skipped, already listening")
+            return
+        }
         isListening = true
+        TravisLogger.log(this, TAG, "startListening()")
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -125,6 +137,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val heard = matches?.get(0)?.lowercase(Locale.getDefault()) ?: ""
+                TravisLogger.log(this@TravisService, TAG, "onResults heard=\"$heard\"")
 
                 if (heard.contains("travis")) {
                     val isEnrollCommand = heard.contains("remember my voice")
@@ -132,25 +145,24 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
                     val profiles = VoiceProfileManager.loadProfiles(applicationContext)
                     val speakerName = VoiceProfileManager.identifySpeaker(applicationContext, capturedSamples)
 
-                    // Allow through if: it's an enrollment command, no profiles exist yet
-                    // (bootstrap case), or the speaker matched a known profile.
                     val allowed = isEnrollCommand || profiles.isEmpty() || speakerName != null
+                    TravisLogger.log(this@TravisService, TAG, "allowed=$allowed speaker=$speakerName")
 
                     if (allowed) {
                         val handledTask = TaskHandler.handle(applicationContext, heard, tts)
                         if (!handledTask) {
                             CoroutineScope(Dispatchers.IO).launch {
-                                val reply = GroqClient.getResponse(heard)
-                                withContext(Dispatchers.Main) {
-                                    tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
+                                try {
+                                    val reply = GroqClient.getResponse(heard)
+                                    withContext(Dispatchers.Main) {
+                                        tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
+                                    }
+                                } catch (e: Exception) {
+                                    TravisLogger.log(this@TravisService, TAG, "GroqClient error: ${e.message}")
                                 }
                             }
                         }
-                        // If handledTask is true, the individual handler in TaskHandler
-                        // already spoke whatever confirmation was needed (or intentionally
-                        // stayed silent for actions like opening an app).
                     }
-                    // If not allowed: unknown voice, ignore silently - no response at all.
                 }
 
                 isListening = false
@@ -158,6 +170,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
             }
 
             override fun onError(error: Int) {
+                TravisLogger.log(this@TravisService, TAG, "onError code=$error")
                 isListening = false
                 val delay = when (error) {
                     SpeechRecognizer.ERROR_CLIENT, SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 1000L
@@ -179,10 +192,13 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
 
-        // No manual stream muting here anymore - audio focus is requested once in
-        // onCreate() and held for the service's lifetime, so restarting the
-        // recognizer no longer touches the volume at all.
-        recognizer?.startListening(intent)
+        try {
+            recognizer?.startListening(intent)
+        } catch (e: Exception) {
+            TravisLogger.log(this, TAG, "startListening() threw: ${e.message}")
+            isListening = false
+            restartListening(1000L)
+        }
     }
 
     private fun bytesToShorts(bytes: ByteArray): ShortArray {
@@ -197,6 +213,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
+        TravisLogger.log(this, TAG, "onDestroy()")
         recognizer?.destroy()
         releaseAudioFocus()
         tts.stop()
