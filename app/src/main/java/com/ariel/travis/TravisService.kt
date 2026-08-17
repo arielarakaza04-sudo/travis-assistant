@@ -1,5 +1,4 @@
-          
- package com.ariel.travis
+package com.ariel.travis
 
 import kotlinx.coroutines.*
 import android.app.*
@@ -135,7 +134,11 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            // Hardcoded to en-US instead of Locale.getDefault(). On a device set to
+            // a Rwandan locale, getDefault() resolves to a language Google's speech
+            // recognizer doesn't support (Kinyarwanda), causing every single
+            // recognition attempt to instantly fail with ERROR_LANGUAGE_NOT_SUPPORTED.
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
         }
 
         recognizer?.setRecognitionListener(object : RecognitionListener {
