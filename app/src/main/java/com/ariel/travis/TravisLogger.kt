@@ -19,23 +19,49 @@ object TravisLogger {
     private const val FILE_NAME = "travis_log.txt"
     private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
+    // In-memory rolling buffer of the most recent log lines. This is what
+    // actually gets read back (via the notification), since reaching the
+    // log file requires storage access that's proven hard to get to in Acode.
+    private const val MAX_LINES = 12
+    private val recentLines = ArrayDeque<String>()
+
+    // Optional callback the service can set to be notified whenever a new
+    // log line arrives, so it can refresh the notification immediately.
+    var onNewLine: (() -> Unit)? = null
+
+    @Synchronized
+    private fun addLine(line: String) {
+        recentLines.addLast(line)
+        while (recentLines.size > MAX_LINES) {
+            recentLines.removeFirst()
+        }
+        onNewLine?.invoke()
+    }
+
+    @Synchronized
+    fun getRecent(): String {
+        return if (recentLines.isEmpty()) "No activity logged yet." else recentLines.joinToString("\n")
+    }
+
     fun log(context: Context, tag: String, message: String) {
+        val line = "${timeFormat.format(Date())} [$tag] $message"
+        addLine(line)
         try {
             val dir = context.getExternalFilesDir(null) ?: context.filesDir
             val file = File(dir, FILE_NAME)
-            val line = "${timeFormat.format(Date())}  [$tag]  $message\n"
-            FileWriter(file, true).use { it.append(line) }
+            FileWriter(file, true).use { it.append("$line\n") }
         } catch (e: Exception) {
             // Logging must never crash the app it's trying to debug.
         }
     }
 
     fun logCrash(context: Context, throwable: Throwable) {
+        val line = "${timeFormat.format(Date())} [FATAL] ${throwable.message ?: throwable.toString()}"
+        addLine(line)
         try {
             val dir = context.getExternalFilesDir(null) ?: context.filesDir
             val file = File(dir, FILE_NAME)
-            val line = "${timeFormat.format(Date())}  [FATAL]  ${throwable.stackTraceToString()}\n"
-            FileWriter(file, true).use { it.append(line) }
+            FileWriter(file, true).use { it.append("$line\n${throwable.stackTraceToString()}\n") }
         } catch (e: Exception) {
             // ignore
         }
