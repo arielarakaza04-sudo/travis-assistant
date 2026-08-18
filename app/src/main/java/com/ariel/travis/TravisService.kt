@@ -84,23 +84,29 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale.US
+            val langResult = tts.setLanguage(Locale.US)
+            TravisLogger.log(this, TAG, "setLanguage result=$langResult (0=OK, -1/-2=missing/unsupported)")
             // Mute Vosk while Travis is actually talking - without this, the mic
             // picks up Travis's own voice through the speaker and feeds it back
             // in as if the user said it, which was causing the "something went
             // wrong" loop to repeat itself endlessly.
             tts.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
+                    TravisLogger.log(this@TravisService, TAG, "TTS onStart id=$utteranceId")
                     speechService?.setPause(true)
                 }
                 override fun onDone(utteranceId: String?) {
+                    TravisLogger.log(this@TravisService, TAG, "TTS onDone id=$utteranceId")
                     speechService?.setPause(false)
                 }
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
+                    TravisLogger.log(this@TravisService, TAG, "TTS onError id=$utteranceId")
                     speechService?.setPause(false)
                 }
             })
+        } else {
+            TravisLogger.log(this, TAG, "TTS init FAILED status=$status")
         }
         TravisLogger.log(this, TAG, "TTS init status=$status")
     }
