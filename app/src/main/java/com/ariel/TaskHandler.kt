@@ -27,6 +27,8 @@ import java.util.Locale
 
 object TaskHandler {
 
+    private const val TAG = "TaskHandler"
+
     // Returns true if it handled a task, false if it's just conversation
     fun handle(context: Context, command: String, tts: TextToSpeech? = null): Boolean {
         val text = command.lowercase()
@@ -36,7 +38,7 @@ object TaskHandler {
             // "anytime", "playtime" etc. mid-sentence and hijacked normal
             // conversation into just reading the clock.
             text.contains("what time") || text.contains("the time") || text.contains("current time") -> {
-                tellTime(tts)
+                tellTime(context, tts)
                 true
             }
             text.contains("weather") -> {
@@ -87,10 +89,11 @@ object TaskHandler {
         }
     }
 
-    private fun tellTime(tts: TextToSpeech?) {
+    private fun tellTime(context: Context, tts: TextToSpeech?) {
         val formatter = SimpleDateFormat("h:mm a", Locale.getDefault())
         val currentTime = formatter.format(Date())
-        tts?.speak("It's $currentTime.", TextToSpeech.QUEUE_FLUSH, null, "travis_time")
+        val spokenId = tts?.speak("It's $currentTime.", TextToSpeech.QUEUE_FLUSH, null, "travis_time")
+        TravisLogger.log(context, TAG, "tellTime: ttsNull=${tts == null} speakResult=$spokenId time=$currentTime")
     }
 
     private fun tellWeather(context: Context, tts: TextToSpeech?) {
@@ -153,11 +156,13 @@ object TaskHandler {
             putExtra(AlarmClock.EXTRA_SKIP_UI, false)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
+        val canResolve = intent.resolveActivity(context.packageManager) != null
+        TravisLogger.log(context, TAG, "setAlarm: canResolve=$canResolve")
         try {
             context.startActivity(intent)
+            TravisLogger.log(context, TAG, "setAlarm: startActivity succeeded")
         } catch (e: Exception) {
-            // No clock/alarm app can handle this intent - fail safely
-            // instead of crashing the whole service.
+            TravisLogger.log(context, TAG, "setAlarm: startActivity threw ${e.message}")
         }
     }
 
