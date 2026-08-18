@@ -85,6 +85,22 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts.language = Locale.US
+            // Mute Vosk while Travis is actually talking - without this, the mic
+            // picks up Travis's own voice through the speaker and feeds it back
+            // in as if the user said it, which was causing the "something went
+            // wrong" loop to repeat itself endlessly.
+            tts.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    speechService?.setPause(true)
+                }
+                override fun onDone(utteranceId: String?) {
+                    speechService?.setPause(false)
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    speechService?.setPause(false)
+                }
+            })
         }
         TravisLogger.log(this, TAG, "TTS init status=$status")
     }
@@ -147,7 +163,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
             if (!handledTask) {
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
-                        val reply = GroqClient.getResponse(heard)
+                        val reply = GroqClient.getResponse(heard, applicationContext)
                         withContext(Dispatchers.Main) {
                             tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
                         }
