@@ -1,13 +1,12 @@
-package com.ariel.travis
+ package com.ariel.travis
 
+import android.content.Context
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Call
 import okhttp3.Callback
-import okhttp3.MediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody
 import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
@@ -19,8 +18,15 @@ object GroqClient {
     private const val API_KEY = BuildConfig.GROQ_API_KEY
     private const val URL = "https://api.groq.com/openai/v1/chat/completions"
     private val client = OkHttpClient()
+    private const val TAG = "GroqClient"
 
-    suspend fun getResponse(userText: String): String = suspendCancellableCoroutine { cont ->
+    suspend fun getResponse(userText: String, context: Context? = null): String = suspendCancellableCoroutine { cont ->
+        if (API_KEY.isBlank()) {
+            context?.let { TravisLogger.log(it, TAG, "API_KEY is blank - GROQ_API_KEY secret likely missing in GitHub Actions") }
+            if (cont.isActive) cont.resume("My API key isn't set up properly, so I can't think right now.")
+            return@suspendCancellableCoroutine
+        }
+
         // Strip the wake word so it doesn't confuse the model into thinking
         // the user is asking about a person named Travis
         val cleanedText = userText.replace("travis", "", ignoreCase = true).trim()
@@ -54,12 +60,20 @@ object GroqClient {
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
+                context?.let { TravisLogger.log(it, TAG, "Network failure: ${e.message}") }
                 if (cont.isActive) cont.resume("Sorry, I couldn't reach my brain right now.")
             }
 
             override fun onResponse(call: Call, response: Response) {
+                val bodyStr = response.body?.string() ?: ""
+                if (!response.isSuccessful) {
+                    context?.let {
+                        TravisLogger.log(it, TAG, "HTTP ${response.code}: ${bodyStr.take(200)}")
+                    }
+                    if (cont.isActive) cont.resume("I got an error from the server: ${response.code}.")
+                    return
+                }
                 try {
-                    val bodyStr = response.body?.string() ?: ""
                     val reply = JSONObject(bodyStr)
                         .getJSONArray("choices")
                         .getJSONObject(0)
@@ -67,6 +81,9 @@ object GroqClient {
                         .getString("content")
                     if (cont.isActive) cont.resume(reply)
                 } catch (e: Exception) {
+                    context?.let {
+                        TravisLogger.log(it, TAG, "Parse error: ${e.message} | body=${bodyStr.take(200)}")
+                    }
                     if (cont.isActive) cont.resume("Something went wrong understanding that.")
                 }
             }
