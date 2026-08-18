@@ -37,11 +37,15 @@ object TaskHandler {
                 searchBrowser(context, text)
                 true
             }
-            text.contains("open browser") -> {
+            // Loosened from requiring the exact adjacent phrase "open browser" -
+            // that missed natural phrasing like "open my browser" entirely.
+            text.contains("browser") -> {
                 openBrowser(context)
                 true
             }
-            text.contains("open gallery") || text.contains("photos") -> {
+            // Same fix here: "open gallery" alone missed "open my gallery",
+            // which is what was actually said during testing.
+            text.contains("gallery") || text.contains("photos") || text.contains("photo") -> {
                 openGallery(context)
                 true
             }
