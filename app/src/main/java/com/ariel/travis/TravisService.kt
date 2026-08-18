@@ -33,6 +33,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     private var isListening = false
     private var hasAudioFocus = false
     private var recognitionAvailable: Boolean? = null
+    private var recognizerPackage: String? = null
 
     private var audioBuffer = ByteArrayOutputStream()
 
@@ -71,7 +72,8 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
         recognitionAvailable = SpeechRecognizer.isRecognitionAvailable(this)
         TravisLogger.log(this, TAG, "isRecognitionAvailable=$recognitionAvailable")
         val resolveInfo = packageManager.resolveService(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH), 0)
-        TravisLogger.log(this, TAG, "recognizerPackage=${resolveInfo?.serviceInfo?.packageName ?: "none"}")
+        recognizerPackage = resolveInfo?.serviceInfo?.packageName ?: "none"
+        TravisLogger.log(this, TAG, "recognizerPackage=$recognizerPackage")
         refreshNotification()
     }
 
@@ -237,7 +239,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun buildNotification(text: String): Notification {
-        val statusLine = "Recognition available: ${recognitionAvailable ?: "checking..."}"
+        val statusLine = "Recognizer: ${recognizerPackage ?: "checking..."} | Available: ${recognitionAvailable ?: "checking..."}"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Travis")
             .setContentText(statusLine)
