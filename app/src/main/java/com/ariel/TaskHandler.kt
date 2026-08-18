@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -16,7 +17,13 @@ import android.speech.tts.TextToSpeech
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 object TaskHandler {
 
@@ -25,6 +32,17 @@ object TaskHandler {
         val text = command.lowercase()
 
         return when {
+            // Time and weather answered directly and fast - Groq has no real
+            // clock or live weather data, so routing these to the LLM either
+            // produced a vague non-answer or a made-up one.
+            text.contains("time") -> {
+                tellTime(tts)
+                true
+            }
+            text.contains("weather") -> {
+                tellWeather(context, tts)
+                true
+            }
             text.contains("alarm") || text.contains("wake me") -> {
                 setAlarm(context, text)
                 true
@@ -67,6 +85,66 @@ object TaskHandler {
             }
             else -> false
         }
+    }
+
+    private fun tellTime(tts: TextToSpeech?) {
+        val formatter = SimpleDateFormat("h:mm a", Locale.getDefault())
+        val currentTime = formatter.format(Date())
+        tts?.speak("It's $currentTime.", TextToSpeech.QUEUE_FLUSH, null, "travis_time")
+    }
+
+    private fun tellWeather(context: Context, tts: TextToSpeech?) {
+        val hasLocationPermission = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasLocationPermission) {
+            tts?.speak(
+                "I need location permission to check the weather.",
+                TextToSpeech.QUEUE_FLUSH, null, "travis_weather_noperm"
+            )
+            return
+        }
+
+        // Runs on a background thread since this makes a network call - the
+        // caller (Vosk's recognition callback) shouldn't be blocked by it.
+        Thread {
+            try {
+                val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+                val location = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                    ?: locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+
+                if (location == null) {
+                    tts?.speak(
+                        "I couldn't get your location to check the weather.",
+                        TextToSpeech.QUEUE_FLUSH, null, "travis_weather_nolocation"
+                    )
+                    return@Thread
+                }
+
+                // Open-Meteo - free, no API key required.
+                val url = "https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}" +
+                    "&longitude=${location.longitude}&current_weather=true"
+                val client = OkHttpClient()
+                val request = Request.Builder().url(url).build()
+
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        tts?.speak("I couldn't reach the weather service.", TextToSpeech.QUEUE_FLUSH, null, "travis_weather_error")
+                        return@Thread
+                    }
+                    val body = response.body?.string() ?: ""
+                    val currentWeather = JSONObject(body).getJSONObject("current_weather")
+                    val tempC = currentWeather.getDouble("temperature")
+                    tts?.speak(
+                        "It's currently ${tempC.toInt()} degrees Celsius outside.",
+                        TextToSpeech.QUEUE_FLUSH, null, "travis_weather"
+                    )
+                }
+            } catch (e: Exception) {
+                tts?.speak("I had trouble checking the weather.", TextToSpeech.QUEUE_FLUSH, null, "travis_weather_error")
+            }
+        }.start()
     }
 
     private fun setAlarm(context: Context, text: String) {
