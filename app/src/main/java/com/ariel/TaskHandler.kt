@@ -32,10 +32,10 @@ object TaskHandler {
         val text = command.lowercase()
 
         return when {
-            // Time and weather answered directly and fast - Groq has no real
-            // clock or live weather data, so routing these to the LLM either
-            // produced a vague non-answer or a made-up one.
-            text.contains("time") -> {
+            // Tightened from a bare "time" check, which matched "sometimes",
+            // "anytime", "playtime" etc. mid-sentence and hijacked normal
+            // conversation into just reading the clock.
+            text.contains("what time") || text.contains("the time") || text.contains("current time") -> {
                 tellTime(tts)
                 true
             }
@@ -153,7 +153,12 @@ object TaskHandler {
             putExtra(AlarmClock.EXTRA_SKIP_UI, false)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
-        context.startActivity(intent)
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            // No clock/alarm app can handle this intent - fail safely
+            // instead of crashing the whole service.
+        }
     }
 
     private fun createCalendarEvent(context: Context, text: String) {
@@ -163,7 +168,12 @@ object TaskHandler {
             putExtra(CalendarContract.Events.DESCRIPTION, text)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
-        context.startActivity(intent)
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            // No calendar app can handle this intent - fail safely instead
+            // of crashing the whole service.
+        }
     }
 
     private fun searchBrowser(context: Context, text: String) {
@@ -178,7 +188,22 @@ object TaskHandler {
             putExtra("query", query)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
-        context.startActivity(intent)
+
+        // ACTION_WEB_SEARCH is normally handled by the Google app, which
+        // isn't installed on this device - nothing resolves it, and
+        // startActivity() would throw and crash the whole service. Fall
+        // back to a plain browser search URL instead, which only needs a
+        // browser (already confirmed present), not Google specifically.
+        if (intent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(intent)
+        } else {
+            val encoded = Uri.encode(query)
+            val fallback = Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse("https://www.google.com/search?q=$encoded")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(fallback)
+        }
     }
 
     private fun openBrowser(context: Context) {
