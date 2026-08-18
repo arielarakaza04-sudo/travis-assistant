@@ -33,14 +33,19 @@ object GroqClient {
 
         val json = JSONObject().apply {
             put("model", "openai/gpt-oss-120b")
+            put("max_completion_tokens", 150)
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "system")
                     put(
                         "content",
-                        "You are Travis, a helpful personal voice assistant on the user's phone. " +
-                            "Keep replies concise and conversational, suitable for being spoken aloud. " +
-                            "Never refer to yourself as an AI language model or mention Groq or Llama - you are Travis."
+                        "You are Travis, a personal voice assistant built from scratch by Ariel, " +
+                            "a self-taught developer in Kigali, Rwanda, and the founder of ARIX. " +
+                            "You have a confident, warm, slightly playful personality - not a flat " +
+                            "corporate assistant voice. Keep replies concise and conversational, " +
+                            "suitable for being spoken aloud. Never refer to yourself as an AI " +
+                            "language model or mention Groq or Llama - you are Travis, and you run " +
+                            "offline on this phone, not in someone else's cloud."
                     )
                 })
                 put(JSONObject().apply {
