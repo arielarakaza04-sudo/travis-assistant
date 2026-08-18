@@ -70,6 +70,8 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
         TravisLogger.log(this, TAG, "onCreate() done, hasAudioFocus=$hasAudioFocus")
         recognitionAvailable = SpeechRecognizer.isRecognitionAvailable(this)
         TravisLogger.log(this, TAG, "isRecognitionAvailable=$recognitionAvailable")
+        val resolveInfo = packageManager.resolveService(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH), 0)
+        TravisLogger.log(this, TAG, "recognizerPackage=${resolveInfo?.serviceInfo?.packageName ?: "none"}")
         refreshNotification()
     }
 
@@ -138,11 +140,11 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            // Hardcoded to en-US instead of Locale.getDefault(). On a device set to
-            // a Rwandan locale, getDefault() resolves to a language Google's speech
-            // recognizer doesn't support (Kinyarwanda), causing every single
-            // recognition attempt to instantly fail with ERROR_LANGUAGE_NOT_SUPPORTED.
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+            // No EXTRA_LANGUAGE override. Forcing "en-US" still hit
+            // ERROR_LANGUAGE_NOT_SUPPORTED, which suggests the device's actual
+            // recognition engine (possibly a Samsung voice service rather than
+            // Google's) doesn't accept that language string. Leaving it unset
+            // lets the engine fall back to its own default supported language.
         }
 
         recognizer?.setRecognitionListener(object : RecognitionListener {
