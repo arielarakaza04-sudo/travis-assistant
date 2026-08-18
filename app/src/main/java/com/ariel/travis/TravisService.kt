@@ -116,6 +116,15 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
             statusLine = "Listening"
             TravisLogger.log(this, TAG, "Vosk listening started")
             refreshNotification()
+
+            // Audible proof of life - Travis announces himself once he's actually
+            // ready to listen, instead of just a silent notification.
+            tts.speak(
+                "Travis is online and ready.",
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "travis_greeting"
+            )
         } catch (e: Exception) {
             statusLine = "Failed to start listening: ${e.message}"
             TravisLogger.log(this, TAG, "startVoskListening error: ${e.message}")
@@ -159,7 +168,12 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
         TravisLogger.log(this, TAG, "heard=\"$heard\"")
 
         if (heard.contains("travis")) {
-            val handledTask = TaskHandler.handle(applicationContext, heard, tts)
+            val handledTask = try {
+                TaskHandler.handle(applicationContext, heard, tts)
+            } catch (e: Exception) {
+                TravisLogger.log(this, TAG, "TaskHandler crashed: ${e.message}")
+                false
+            }
             if (!handledTask) {
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
