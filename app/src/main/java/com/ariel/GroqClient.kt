@@ -1,4 +1,4 @@
- package com.ariel.travis
+package com.ariel.travis
 
 import android.content.Context
 import okhttp3.MediaType.Companion.toMediaType
@@ -32,7 +32,7 @@ object GroqClient {
         val cleanedText = userText.replace("travis", "", ignoreCase = true).trim()
 
         val json = JSONObject().apply {
-            put("model", "llama-3.3-70b-versatile")
+            put("model", "openai/gpt-oss-120b")
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "system")
