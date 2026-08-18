@@ -6,6 +6,7 @@ import okhttp3.Request
 import org.vosk.Model
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 
 /**
@@ -20,8 +21,16 @@ object VoskModelManager {
 
     private const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
     private const val MODEL_FOLDER_NAME = "vosk-model-small-en-us-0.15"
+    private const val MAX_ATTEMPTS = 4
 
-    private val client = OkHttpClient()
+    // Generous timeouts and retries - the default 10s read timeout was killing
+    // downloads on slower/unstable mobile hotspot connections mid-transfer.
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
 
     fun getOrDownloadModel(
         context: Context,
@@ -39,35 +48,59 @@ object VoskModelManager {
         }
 
         Thread {
-            try {
-                onProgress("Downloading speech model (~40MB, first run only)...")
-                baseDir.mkdirs()
-                val zipFile = File(context.filesDir, "vosk-model.zip")
+            var lastError: Exception? = null
+            for (attempt in 1..MAX_ATTEMPTS) {
+                try {
+                    onProgress("Downloading speech model (~40MB, attempt $attempt/$MAX_ATTEMPTS)...")
+                    baseDir.mkdirs()
+                    val zipFile = File(context.filesDir, "vosk-model.zip")
 
-                val request = Request.Builder().url(MODEL_URL).build()
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        throw Exception("Model download failed: HTTP ${response.code}")
+                    val request = Request.Builder().url(MODEL_URL).build()
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            throw Exception("Model download failed: HTTP ${response.code}")
+                        }
+                        val body = response.body ?: throw Exception("Empty response body")
+                        val totalBytes = body.contentLength()
+                        var downloaded = 0L
+                        var lastReportedMb = -1L
+
+                        body.byteStream().use { input ->
+                            FileOutputStream(zipFile).use { output ->
+                                val buffer = ByteArray(65536)
+                                var read: Int
+                                while (input.read(buffer).also { read = it } != -1) {
+                                    output.write(buffer, 0, read)
+                                    downloaded += read
+                                    val mb = downloaded / (1024 * 1024)
+                                    if (mb != lastReportedMb) {
+                                        lastReportedMb = mb
+                                        val totalMb = if (totalBytes > 0) (totalBytes / (1024 * 1024)).toString() else "?"
+                                        onProgress("Downloading model: ${mb}MB / ${totalMb}MB...")
+                                    }
+                                }
+                            }
+                        }
                     }
-                    val body = response.body ?: throw Exception("Empty response body")
-                    FileOutputStream(zipFile).use { output ->
-                        body.byteStream().copyTo(output)
+
+                    onProgress("Unpacking model...")
+                    unzip(zipFile, baseDir)
+                    zipFile.delete()
+
+                    if (!isValidModelDir(modelDir)) {
+                        throw Exception("Model extracted but expected files are missing - download may be corrupt")
                     }
+
+                    onProgress("Loading model...")
+                    loadModel(modelDir, onReady, onError)
+                    return@Thread
+                } catch (e: Exception) {
+                    lastError = e
+                    onProgress("Attempt $attempt failed: ${e.message}. Retrying...")
+                    Thread.sleep(3000)
                 }
-
-                onProgress("Unpacking model...")
-                unzip(zipFile, baseDir)
-                zipFile.delete()
-
-                if (!isValidModelDir(modelDir)) {
-                    throw Exception("Model extracted but expected files are missing - download may be corrupt")
-                }
-
-                onProgress("Loading model...")
-                loadModel(modelDir, onReady, onError)
-            } catch (e: Exception) {
-                onError(e)
             }
+            onError(lastError ?: Exception("Model download failed after $MAX_ATTEMPTS attempts"))
         }.start()
     }
 
