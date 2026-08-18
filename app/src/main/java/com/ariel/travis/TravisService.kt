@@ -32,6 +32,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     private var recognizer: SpeechRecognizer? = null
     private var isListening = false
     private var hasAudioFocus = false
+    private var recognitionAvailable: Boolean? = null
 
     private var audioBuffer = ByteArrayOutputStream()
 
@@ -67,7 +68,9 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
 
         requestAudioFocusOnce()
         TravisLogger.log(this, TAG, "onCreate() done, hasAudioFocus=$hasAudioFocus")
-        TravisLogger.log(this, TAG, "isRecognitionAvailable=${SpeechRecognizer.isRecognitionAvailable(this)}")
+        recognitionAvailable = SpeechRecognizer.isRecognitionAvailable(this)
+        TravisLogger.log(this, TAG, "isRecognitionAvailable=$recognitionAvailable")
+        refreshNotification()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -232,10 +235,11 @@ class TravisService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun buildNotification(text: String): Notification {
+        val statusLine = "Recognition available: ${recognitionAvailable ?: "checking..."}"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Travis")
-            .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(TravisLogger.getRecent()))
+            .setContentText(statusLine)
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$statusLine\n\n${TravisLogger.getRecent()}"))
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .build()
