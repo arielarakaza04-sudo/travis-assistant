@@ -23,6 +23,13 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
         const val NOTIFICATION_ID = 1
         private const val TAG = "TravisService"
         private const val SAMPLE_RATE = 16000.0f
+
+        // Fuzzy wake word - Vosk on the lgraph model frequently mishears
+        // "travis" as one of these, especially with a non-US accent. Add
+        // to this list as real mishears show up in TravisLogger.
+        private val WAKE_WORD_VARIANTS = listOf(
+            "travis", "travus", "traves", "travis's", "trellis", "davis", "travas", "traviss"
+        )
     }
 
     private lateinit var tts: TextToSpeech
@@ -32,15 +39,11 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
     private var statusLine: String = "Starting..."
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // Service-scoped coroutine scope so we don't leak coroutines or launch
-    // work after the service has been destroyed.
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
 
-        // Catch anything that would otherwise silently kill the process, and
-        // write it to the notification log before the app dies.
         Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
             TravisLogger.logCrash(applicationContext, throwable)
         }
@@ -90,10 +93,6 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
         if (status == TextToSpeech.SUCCESS) {
             val langResult = tts.setLanguage(Locale.US)
             TravisLogger.log(this, TAG, "setLanguage result=$langResult (0=OK, -1/-2=missing/unsupported)")
-            // Mute Vosk while Travis is actually talking - without this, the mic
-            // picks up Travis's own voice through the speaker and feeds it back
-            // in as if the user said it, which was causing the "something went
-            // wrong" loop to repeat itself endlessly.
             tts.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     TravisLogger.log(this@TravisService, TAG, "TTS onStart id=$utteranceId")
@@ -118,17 +117,16 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
     private fun startVoskListening() {
         val currentModel = model ?: return
         try {
+            // Open-vocabulary recognizer - kept unconstrained because
+            // TaskHandler needs to catch arbitrary contact names, search
+            // terms, song titles, and book names, not just fixed phrases.
             val recognizer = Recognizer(currentModel, SAMPLE_RATE)
             speechService = SpeechService(recognizer, SAMPLE_RATE)
-            // No timeout arg - listens continuously instead of the old
-            // single-shot-then-restart loop that caused the error 9/12 storm.
             speechService?.startListening(this)
             statusLine = "Listening"
             TravisLogger.log(this, TAG, "Vosk listening started")
             refreshNotification()
 
-            // Audible proof of life - Travis announces himself once he's actually
-            // ready to listen, instead of just a silent notification.
             tts.speak(
                 "Travis is online and ready.",
                 TextToSpeech.QUEUE_FLUSH,
@@ -164,6 +162,10 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
         TravisLogger.log(this, TAG, "Vosk onTimeout")
     }
 
+    private fun containsWakeWord(heard: String): Boolean {
+        return WAKE_WORD_VARIANTS.any { heard.contains(it) }
+    }
+
     private fun handleHypothesis(hypothesis: String?) {
         if (hypothesis.isNullOrBlank()) return
 
@@ -177,15 +179,8 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
         if (heard.isBlank()) return
         TravisLogger.log(this, TAG, "heard=\"$heard\"")
 
-        if (!heard.contains("travis")) return
+        if (!containsWakeWord(heard)) return
 
-        // FIX: this used to call TaskHandler.handle() synchronously right here,
-        // on Vosk's own recognition callback thread. Anything TaskHandler did
-        // that touched ContentResolver, PDF parsing, or startActivity() blocked
-        // Vosk from processing the next chunk of audio until it returned - that
-        // was the main source of "Travis feels delayed on everything." Moving
-        // the whole dispatch into the service's coroutine scope frees Vosk's
-        // thread immediately regardless of what TaskHandler ends up doing.
         serviceScope.launch {
             val handledTask = try {
                 TaskHandler.handle(applicationContext, heard, tts)
