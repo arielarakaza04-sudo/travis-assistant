@@ -8,6 +8,8 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.provider.ContactsContract
@@ -30,15 +32,34 @@ object TaskHandler {
 
     private const val TAG = "TaskHandler"
 
-    // FIX: shared client with explicit timeouts, reused instead of creating
-    // a new OkHttpClient() per weather call. Previously had no timeout
-    // ceiling at all, which could hang on bad mobile connections.
     private val weatherClient = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
         .build()
 
-    // Returns true if it handled a task, false if it's just conversation
+    // FIX: TaskHandler now runs off the main thread (fix #1, to stop it
+    // blocking Vosk). But TextToSpeech was created on the main thread, and
+    // calling tts.speak() from a background thread without a Looper caused
+    // it to silently fail - onStart would fire but no audio ever played.
+    // Every speak call in this file now routes through here so it always
+    // executes on the main thread, regardless of what thread handle() itself
+    // is running on.
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun speakMain(tts: TextToSpeech?, text: String, utteranceId: String) {
+        if (tts == null) return
+        mainHandler.post {
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        }
+    }
+
+    private fun speakMainAdd(tts: TextToSpeech?, text: String, utteranceId: String) {
+        if (tts == null) return
+        mainHandler.post {
+            tts.speak(text, TextToSpeech.QUEUE_ADD, null, utteranceId)
+        }
+    }
+
     fun handle(context: Context, command: String, tts: TextToSpeech? = null): Boolean {
         val text = command.lowercase()
 
@@ -94,8 +115,8 @@ object TaskHandler {
     private fun tellTime(context: Context, tts: TextToSpeech?) {
         val formatter = SimpleDateFormat("h:mm a", Locale.getDefault())
         val currentTime = formatter.format(Date())
-        val spokenId = tts?.speak("It's $currentTime.", TextToSpeech.QUEUE_FLUSH, null, "travis_time")
-        TravisLogger.log(context, TAG, "tellTime: ttsNull=${tts == null} speakResult=$spokenId time=$currentTime")
+        speakMain(tts, "It's $currentTime.", "travis_time")
+        TravisLogger.log(context, TAG, "tellTime: ttsNull=${tts == null} time=$currentTime")
     }
 
     private fun tellWeather(context: Context, tts: TextToSpeech?) {
@@ -104,16 +125,10 @@ object TaskHandler {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (!hasLocationPermission) {
-            tts?.speak(
-                "I need location permission to check the weather.",
-                TextToSpeech.QUEUE_FLUSH, null, "travis_weather_noperm"
-            )
+            speakMain(tts, "I need location permission to check the weather.", "travis_weather_noperm")
             return
         }
 
-        // Runs on a background thread since this makes a network call - the
-        // caller now runs inside serviceScope already, but this keeps
-        // tellWeather safe to call from anywhere in the future too.
         Thread {
             try {
                 val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -121,10 +136,7 @@ object TaskHandler {
                     ?: locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
 
                 if (location == null) {
-                    tts?.speak(
-                        "I couldn't get your location to check the weather.",
-                        TextToSpeech.QUEUE_FLUSH, null, "travis_weather_nolocation"
-                    )
+                    speakMain(tts, "I couldn't get your location to check the weather.", "travis_weather_nolocation")
                     return@Thread
                 }
 
@@ -134,19 +146,16 @@ object TaskHandler {
 
                 weatherClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
-                        tts?.speak("I couldn't reach the weather service.", TextToSpeech.QUEUE_FLUSH, null, "travis_weather_error")
+                        speakMain(tts, "I couldn't reach the weather service.", "travis_weather_error")
                         return@Thread
                     }
                     val body = response.body?.string() ?: ""
                     val currentWeather = JSONObject(body).getJSONObject("current_weather")
                     val tempC = currentWeather.getDouble("temperature")
-                    tts?.speak(
-                        "It's currently ${tempC.toInt()} degrees Celsius outside.",
-                        TextToSpeech.QUEUE_FLUSH, null, "travis_weather"
-                    )
+                    speakMain(tts, "It's currently ${tempC.toInt()} degrees Celsius outside.", "travis_weather")
                 }
             } catch (e: Exception) {
-                tts?.speak("I had trouble checking the weather.", TextToSpeech.QUEUE_FLUSH, null, "travis_weather_error")
+                speakMain(tts, "I had trouble checking the weather.", "travis_weather_error")
             }
         }.start()
     }
@@ -235,7 +244,7 @@ object TaskHandler {
         val name = text.substringAfter("call ").trim()
 
         if (name.isEmpty()) {
-            tts?.speak("Who do you want to call?", TextToSpeech.QUEUE_FLUSH, null, "travis_call_empty")
+            speakMain(tts, "Who do you want to call?", "travis_call_empty")
             return
         }
 
@@ -247,17 +256,14 @@ object TaskHandler {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (!hasCallPermission || !hasContactsPermission) {
-            tts?.speak(
-                "I need call and contacts permission to do that.",
-                TextToSpeech.QUEUE_FLUSH, null, "travis_call_noperm"
-            )
+            speakMain(tts, "I need call and contacts permission to do that.", "travis_call_noperm")
             return
         }
 
         val phoneNumber = lookupContactNumber(context, name)
 
         if (phoneNumber == null) {
-            tts?.speak("I couldn't find $name in your contacts.", TextToSpeech.QUEUE_FLUSH, null, "travis_call_notfound")
+            speakMain(tts, "I couldn't find $name in your contacts.", "travis_call_notfound")
             return
         }
 
@@ -291,7 +297,7 @@ object TaskHandler {
         val query = text.substringAfter("play ").trim()
 
         if (query.isEmpty()) {
-            tts?.speak("What do you want to play?", TextToSpeech.QUEUE_FLUSH, null, "travis_play_empty")
+            speakMain(tts, "What do you want to play?", "travis_play_empty")
             return
         }
 
@@ -343,15 +349,12 @@ object TaskHandler {
         val name = text.substringAfter("read ").trim()
 
         if (name.isEmpty()) {
-            tts?.speak("Which book do you want me to read?", TextToSpeech.QUEUE_FLUSH, null, "travis_read_empty")
+            speakMain(tts, "Which book do you want me to read?", "travis_read_empty")
             return
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-            tts?.speak(
-                "I need file access permission first. Please grant All files access in settings.",
-                TextToSpeech.QUEUE_FLUSH, null, "travis_read_noperm"
-            )
+            speakMain(tts, "I need file access permission first. Please grant All files access in settings.", "travis_read_noperm")
             return
         }
 
@@ -362,7 +365,7 @@ object TaskHandler {
         }?.firstOrNull()
 
         if (pdfFile == null) {
-            tts?.speak("I couldn't find $name in your Documents folder.", TextToSpeech.QUEUE_FLUSH, null, "travis_read_notfound")
+            speakMain(tts, "I couldn't find $name in your Documents folder.", "travis_read_notfound")
             return
         }
 
@@ -374,7 +377,7 @@ object TaskHandler {
             document.close()
             speakInChunks(fullText, tts)
         } catch (e: Exception) {
-            tts?.speak("I had trouble reading that file.", TextToSpeech.QUEUE_FLUSH, null, "travis_read_error")
+            speakMain(tts, "I had trouble reading that file.", "travis_read_error")
         }
     }
 
@@ -386,10 +389,7 @@ object TaskHandler {
         }
 
         if (name.isEmpty()) {
-            tts?.speak(
-                "Who should I remember this voice as? Try saying, remember my voice as your name.",
-                TextToSpeech.QUEUE_FLUSH, null, "voice_enroll_noname"
-            )
+            speakMain(tts, "Who should I remember this voice as? Try saying, remember my voice as your name.", "voice_enroll_noname")
             return
         }
 
@@ -414,8 +414,11 @@ object TaskHandler {
         if (current.isNotEmpty()) chunks.add(current.toString())
 
         chunks.forEachIndexed { index, chunk ->
-            val queueMode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-            tts.speak(chunk, queueMode, null, "travis_read_chunk_$index")
+            if (index == 0) {
+                speakMain(tts, chunk, "travis_read_chunk_$index")
+            } else {
+                speakMainAdd(tts, chunk, "travis_read_chunk_$index")
+            }
         }
     }
 }
