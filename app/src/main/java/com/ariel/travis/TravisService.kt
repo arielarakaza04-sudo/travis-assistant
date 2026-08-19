@@ -32,6 +32,10 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
     private var statusLine: String = "Starting..."
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    // Service-scoped coroutine scope so we don't leak coroutines or launch
+    // work after the service has been destroyed.
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     override fun onCreate() {
         super.onCreate()
 
@@ -173,23 +177,30 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
         if (heard.isBlank()) return
         TravisLogger.log(this, TAG, "heard=\"$heard\"")
 
-        if (heard.contains("travis")) {
+        if (!heard.contains("travis")) return
+
+        // FIX: this used to call TaskHandler.handle() synchronously right here,
+        // on Vosk's own recognition callback thread. Anything TaskHandler did
+        // that touched ContentResolver, PDF parsing, or startActivity() blocked
+        // Vosk from processing the next chunk of audio until it returned - that
+        // was the main source of "Travis feels delayed on everything." Moving
+        // the whole dispatch into the service's coroutine scope frees Vosk's
+        // thread immediately regardless of what TaskHandler ends up doing.
+        serviceScope.launch {
             val handledTask = try {
                 TaskHandler.handle(applicationContext, heard, tts)
             } catch (e: Exception) {
-                TravisLogger.log(this, TAG, "TaskHandler crashed: ${e.message}")
+                TravisLogger.log(this@TravisService, TAG, "TaskHandler crashed: ${e.message}")
                 false
             }
             if (!handledTask) {
-                CoroutineScope(Dispatchers.IO).launch {
-                    try {
-                        val reply = GroqClient.getResponse(heard, applicationContext)
-                        withContext(Dispatchers.Main) {
-                            tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
-                        }
-                    } catch (e: Exception) {
-                        TravisLogger.log(this@TravisService, TAG, "GroqClient error: ${e.message}")
+                try {
+                    val reply = GroqClient.getResponse(heard, applicationContext)
+                    withContext(Dispatchers.Main) {
+                        tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "travis_reply")
                     }
+                } catch (e: Exception) {
+                    TravisLogger.log(this@TravisService, TAG, "GroqClient error: ${e.message}")
                 }
             }
         }
@@ -197,6 +208,7 @@ class TravisService : Service(), TextToSpeech.OnInitListener, RecognitionListene
 
     override fun onDestroy() {
         TravisLogger.log(this, TAG, "onDestroy()")
+        serviceScope.cancel()
         speechService?.stop()
         speechService?.shutdown()
         tts.stop()
