@@ -10,21 +10,23 @@ import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 
 /**
- * Downloads the small English Vosk model (~40MB) the first time Travis runs,
- * unpacks it into app-private storage, and loads it. On every run after that,
- * it's already on disk, so this just loads it directly - no network needed.
+ * Downloads the Vosk model the first time Travis runs, unpacks it into
+ * app-private storage, and loads it. On every run after that, it's already
+ * on disk, so this just loads it directly - no network needed.
  *
  * This avoids committing a large binary model file to the GitHub repo, which
  * would exceed GitHub's mobile web upload size limit.
  */
 object VoskModelManager {
 
-    private const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
-    private const val MODEL_FOLDER_NAME = "vosk-model-small-en-us-0.15"
+    // FIX: upgraded from vosk-model-small-en-us-0.15 (~40MB) to the lgraph
+    // model (~128MB). The small model was mishearing basic commands and even
+    // the "travis" wake word itself. This one trades a bigger one-time
+    // download for meaningfully better recognition accuracy.
+    private const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip"
+    private const val MODEL_FOLDER_NAME = "vosk-model-en-us-0.22-lgraph"
     private const val MAX_ATTEMPTS = 4
 
-    // Generous timeouts and retries - the default 10s read timeout was killing
-    // downloads on slower/unstable mobile hotspot connections mid-transfer.
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
@@ -51,7 +53,7 @@ object VoskModelManager {
             var lastError: Exception? = null
             for (attempt in 1..MAX_ATTEMPTS) {
                 try {
-                    onProgress("Downloading speech model (~40MB, attempt $attempt/$MAX_ATTEMPTS)...")
+                    onProgress("Downloading speech model (~128MB, attempt $attempt/$MAX_ATTEMPTS)...")
                     baseDir.mkdirs()
                     val zipFile = File(context.filesDir, "vosk-model.zip")
 
