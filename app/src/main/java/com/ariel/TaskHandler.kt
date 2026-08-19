@@ -37,13 +37,6 @@ object TaskHandler {
         .readTimeout(8, TimeUnit.SECONDS)
         .build()
 
-    // FIX: TaskHandler now runs off the main thread (fix #1, to stop it
-    // blocking Vosk). But TextToSpeech was created on the main thread, and
-    // calling tts.speak() from a background thread without a Looper caused
-    // it to silently fail - onStart would fire but no audio ever played.
-    // Every speak call in this file now routes through here so it always
-    // executes on the main thread, regardless of what thread handle() itself
-    // is running on.
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private fun speakMain(tts: TextToSpeech?, text: String, utteranceId: String) {
@@ -60,56 +53,52 @@ object TaskHandler {
         }
     }
 
+    // Returns the trigger that actually matched, or null. Used so downstream
+    // extraction (substringAfter) splits on the variant Vosk really produced,
+    // not always on the "correct" spelling - e.g. if Vosk drops a letter
+    // and produces "cal john" instead of "call john".
+    private fun matchedTrigger(text: String, vararg triggers: String): String? {
+        return triggers.firstOrNull { text.contains(it) }
+    }
+
     fun handle(context: Context, command: String, tts: TextToSpeech? = null): Boolean {
         val text = command.lowercase()
 
-        return when {
-            text.contains("what time") || text.contains("the time") || text.contains("current time") -> {
-                tellTime(context, tts)
-                true
-            }
-            text.contains("weather") -> {
-                tellWeather(context, tts)
-                true
-            }
-            text.contains("alarm") || text.contains("wake me") -> {
-                setAlarm(context, text)
-                true
-            }
-            text.contains("calendar") || text.contains("remind me") || text.contains("event") -> {
-                createCalendarEvent(context, text)
-                true
-            }
-            text.contains("search") || text.contains("look up") || text.contains("google") -> {
-                searchBrowser(context, text)
-                true
-            }
-            text.contains("browser") -> {
-                openBrowser(context)
-                true
-            }
-            text.contains("gallery") || text.contains("photos") || text.contains("photo") -> {
-                openGallery(context)
-                true
-            }
-            text.contains("call ") -> {
-                callContact(context, text, tts)
-                true
-            }
-            text.contains("play ") -> {
-                playMedia(context, text, tts)
-                true
-            }
-            text.contains("read ") -> {
-                readBook(context, text, tts)
-                true
-            }
-            text.contains("remember my voice") -> {
-                enrollVoice(context, text, tts)
-                true
-            }
-            else -> false
+        matchedTrigger(text, "what time", "the time", "current time", "what's the time")?.let {
+            tellTime(context, tts); return true
         }
+        matchedTrigger(text, "weather")?.let {
+            tellWeather(context, tts); return true
+        }
+        matchedTrigger(text, "alarm", "wake me")?.let {
+            setAlarm(context, text); return true
+        }
+        matchedTrigger(text, "calendar", "remind me", "event")?.let {
+            createCalendarEvent(context, text); return true
+        }
+        matchedTrigger(text, "search", "look up", "google")?.let {
+            searchBrowser(context, text); return true
+        }
+        matchedTrigger(text, "browser", "browzer", "browsr")?.let {
+            openBrowser(context); return true
+        }
+        matchedTrigger(text, "gallery", "galery", "photos", "photo")?.let {
+            openGallery(context); return true
+        }
+        matchedTrigger(text, "call ", "cal ", "kall ")?.let { trigger ->
+            callContact(context, text, trigger, tts); return true
+        }
+        matchedTrigger(text, "play ", "ply ")?.let { trigger ->
+            playMedia(context, text, trigger, tts); return true
+        }
+        matchedTrigger(text, "read ", "reed ")?.let { trigger ->
+            readBook(context, text, trigger, tts); return true
+        }
+        matchedTrigger(text, "remember my voice")?.let {
+            enrollVoice(context, text, tts); return true
+        }
+
+        return false
     }
 
     private fun tellTime(context: Context, tts: TextToSpeech?) {
@@ -240,8 +229,8 @@ object TaskHandler {
         }
     }
 
-    private fun callContact(context: Context, text: String, tts: TextToSpeech?) {
-        val name = text.substringAfter("call ").trim()
+    private fun callContact(context: Context, text: String, trigger: String, tts: TextToSpeech?) {
+        val name = text.substringAfter(trigger).trim()
 
         if (name.isEmpty()) {
             speakMain(tts, "Who do you want to call?", "travis_call_empty")
@@ -293,8 +282,8 @@ object TaskHandler {
         return null
     }
 
-    private fun playMedia(context: Context, text: String, tts: TextToSpeech?) {
-        val query = text.substringAfter("play ").trim()
+    private fun playMedia(context: Context, text: String, trigger: String, tts: TextToSpeech?) {
+        val query = text.substringAfter(trigger).trim()
 
         if (query.isEmpty()) {
             speakMain(tts, "What do you want to play?", "travis_play_empty")
@@ -345,8 +334,8 @@ object TaskHandler {
         return null
     }
 
-    private fun readBook(context: Context, text: String, tts: TextToSpeech?) {
-        val name = text.substringAfter("read ").trim()
+    private fun readBook(context: Context, text: String, trigger: String, tts: TextToSpeech?) {
+        val name = text.substringAfter(trigger).trim()
 
         if (name.isEmpty()) {
             speakMain(tts, "Which book do you want me to read?", "travis_read_empty")
