@@ -11,14 +11,25 @@ import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
 object GroqClient {
     private const val API_KEY = BuildConfig.GROQ_API_KEY
     private const val URL = "https://api.groq.com/openai/v1/chat/completions"
-    private val client = OkHttpClient()
     private const val TAG = "GroqClient"
+
+    // FIX: previously OkHttpClient() used default 10s connect/read/write
+    // timeouts and had no explicit ceiling of its own - on flaky mobile data
+    // that could stall a lot longer than felt like "Travis is thinking."
+    // Tighter timeouts here mean Travis fails fast and speaks an error
+    // instead of just going silent for a long stretch.
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(6, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .writeTimeout(6, TimeUnit.SECONDS)
+        .build()
 
     suspend fun getResponse(userText: String, context: Context? = null): String = suspendCancellableCoroutine { cont ->
         if (API_KEY.isBlank()) {
@@ -33,7 +44,9 @@ object GroqClient {
 
         val json = JSONObject().apply {
             put("model", "openai/gpt-oss-120b")
-            put("max_completion_tokens", 150)
+            // FIX: trimmed from 150 - replies are spoken aloud, so shorter
+            // completions finish generating faster and still sound natural.
+            put("max_completion_tokens", 80)
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "system")
@@ -63,7 +76,13 @@ object GroqClient {
             .post(body)
             .build()
 
-        client.newCall(request).enqueue(object : Callback {
+        val call = client.newCall(request)
+
+        // If the coroutine is cancelled (e.g. service destroyed mid-request),
+        // cancel the underlying HTTP call too instead of leaking it.
+        cont.invokeOnCancellation { call.cancel() }
+
+        call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 context?.let { TravisLogger.log(it, TAG, "Network failure: ${e.message}") }
                 if (cont.isActive) cont.resume("Sorry, I couldn't reach my brain right now.")
