@@ -24,19 +24,25 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 object TaskHandler {
 
     private const val TAG = "TaskHandler"
+
+    // FIX: shared client with explicit timeouts, reused instead of creating
+    // a new OkHttpClient() per weather call. Previously had no timeout
+    // ceiling at all, which could hang on bad mobile connections.
+    private val weatherClient = OkHttpClient.Builder()
+        .connectTimeout(6, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .build()
 
     // Returns true if it handled a task, false if it's just conversation
     fun handle(context: Context, command: String, tts: TextToSpeech? = null): Boolean {
         val text = command.lowercase()
 
         return when {
-            // Tightened from a bare "time" check, which matched "sometimes",
-            // "anytime", "playtime" etc. mid-sentence and hijacked normal
-            // conversation into just reading the clock.
             text.contains("what time") || text.contains("the time") || text.contains("current time") -> {
                 tellTime(context, tts)
                 true
@@ -57,14 +63,10 @@ object TaskHandler {
                 searchBrowser(context, text)
                 true
             }
-            // Loosened from requiring the exact adjacent phrase "open browser" -
-            // that missed natural phrasing like "open my browser" entirely.
             text.contains("browser") -> {
                 openBrowser(context)
                 true
             }
-            // Same fix here: "open gallery" alone missed "open my gallery",
-            // which is what was actually said during testing.
             text.contains("gallery") || text.contains("photos") || text.contains("photo") -> {
                 openGallery(context)
                 true
@@ -110,7 +112,8 @@ object TaskHandler {
         }
 
         // Runs on a background thread since this makes a network call - the
-        // caller (Vosk's recognition callback) shouldn't be blocked by it.
+        // caller now runs inside serviceScope already, but this keeps
+        // tellWeather safe to call from anywhere in the future too.
         Thread {
             try {
                 val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -125,13 +128,11 @@ object TaskHandler {
                     return@Thread
                 }
 
-                // Open-Meteo - free, no API key required.
                 val url = "https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}" +
                     "&longitude=${location.longitude}&current_weather=true"
-                val client = OkHttpClient()
                 val request = Request.Builder().url(url).build()
 
-                client.newCall(request).execute().use { response ->
+                weatherClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         tts?.speak("I couldn't reach the weather service.", TextToSpeech.QUEUE_FLUSH, null, "travis_weather_error")
                         return@Thread
@@ -194,11 +195,6 @@ object TaskHandler {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
 
-        // ACTION_WEB_SEARCH is normally handled by the Google app, which
-        // isn't installed on this device - nothing resolves it, and
-        // startActivity() would throw and crash the whole service. Fall
-        // back to a plain browser search URL instead, which only needs a
-        // browser (already confirmed present), not Google specifically.
         if (intent.resolveActivity(context.packageManager) != null) {
             context.startActivity(intent)
         } else {
@@ -383,7 +379,6 @@ object TaskHandler {
     }
 
     private fun enrollVoice(context: Context, text: String, tts: TextToSpeech?) {
-        // Expects phrasing like "remember my voice as Ariel"
         val name = if (text.contains(" as ")) {
             text.substringAfterLast(" as ").trim()
         } else {
